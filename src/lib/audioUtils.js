@@ -10,7 +10,7 @@ exports.pcmEncode = function(input) {
 };
 
 
-exports.downsampleBuffer = function(buffer, inputSampleRate = 44100, outputSampleRate = 16000) {
+exports.downsampleBuffer = function(buffer, inputSampleRate = 44100, outputSampleRate = 8000) {
         
     if (outputSampleRate === inputSampleRate) {
         return buffer;

@@ -18,14 +18,14 @@ export default function Transcriber() {
         // let region;
         // let speaker = true ;
         let transcription = "";
+        let socket;
 
         let sampleRate = 8000;
         let inputSampleRate;
-        let socket;
         let micStream;
         let socketError = false;
         let transcribeException = false;
-        let previousSpeaker = 0;
+        // let previousSpeaker = 0;
 
         if (!window.navigator.mediaDevices.getUserMedia) {
             showError('We support the latest versions of Chrome, Firefox, Safari, and Edge. Update your browser and try your request again.');
@@ -39,20 +39,20 @@ export default function Transcriber() {
            
                 window.navigator.mediaDevices.getUserMedia({
                     video: false,
-                    // audio: true
-                    audio: {
-                        echoCancellation: true
-                    }
+                    audio: true
+                    // audio: {
+                    //     echoCancellation: true
+                    // }
                 })
                 // ...then we convert the mic stream to binary event stream messages when the promise resolves 
                 // .then(initAudioFilter)
                 .then(streamAudioToWebSocket) 
                 .catch(function (error) {
-                    console.log("Error in streaming audio to AWS Transcribe");
+                    console.log("Error in streaming audio to server.");
                     showError('There was an error streaming your audio to server. Please try again.');
                     toggleStartStop();
                 });
-        });
+            });
 
             let streamAudioToWebSocket = async function (userMediaStream) {
                 micStream = new mic();    
@@ -60,7 +60,7 @@ export default function Transcriber() {
                     inputSampleRate = data.sampleRate;
                 });        
                 micStream.setStream(userMediaStream);       
-
+                
                 // WebSocket API: ws://asr-backend.herokuapp.com/
                 let url = "ws://asr-backend.herokuapp.com/";
 
@@ -70,13 +70,15 @@ export default function Transcriber() {
             
                 // when we get audio data from the mic, send it to the WebSocket if possible
                 socket.onopen = function() {
+                    console.log('WebSocket Client Connected');
                     micStream.on('data', function(rawAudioChunk) {
                         // initAudioFilter(rawAudioChunk);
                         // the audio stream is raw audio bytes. Transcribe expects PCM with additional metadata, encoded as binary
                         let binary = convertAudioToBinaryMessage(rawAudioChunk);    
                         if (socket.readyState === socket.OPEN)
+                            console.log("Binary Legth: ", binary.byteLength);
                             socket.send(binary);
-                    }
+                        }
                 )};   
                 // handle messages, errors, and close events
                 wireSocketEvents();
@@ -86,17 +88,20 @@ export default function Transcriber() {
                 // handle inbound messages from Amazon Transcribe
                 socket.onmessage = function (message) {
                     //convert the binary event stream message to JSON
-                    let messageWrapper = eventStreamMarshaller.unmarshall(Buffer(message.data));
-                    let messageBody = JSON.parse(String.fromCharCode.apply(String, messageWrapper.body));
+                    // let messageWrapper = eventStreamMarshaller.unmarshall(Buffer(message.data));
+                    // let messageBody = JSON.parse(String.fromCharCode.apply(String, messageWrapper.body));
                     // if (messageWrapper.headers[":message-type"].value === "event") {
                     //     handleEventStreamMessage(messageBody);
                     // }
+                    // let messageWrapper = eventStreamMarshaller.unmarshall(Buffer(message.data))
+                    // 
+                    let messageBody = JSON.parse(message.data);
                     if(messageBody !== null) {
                         handleEventStreamMessage(messageBody);
                     }
                     else {
                         transcribeException = true;
-                        showError(messageBody.Message);
+                        showError("Error in server response! ", messageBody.Message);
                         toggleStartStop();
                     }
                 };
@@ -113,7 +118,7 @@ export default function Transcriber() {
                     
                     // the close event immediately follows the error event; only handle one.
                     if (!socketError && !transcribeException) {
-                        if (closeEvent.code != 1000) {
+                        if (closeEvent.code !== 1000) {
                             showError('Streaming Exception\n' + closeEvent.reason);
                         }
                         toggleStartStop();
@@ -123,10 +128,21 @@ export default function Transcriber() {
 
             let handleEventStreamMessage = function (messageJson) {
                 let transcriptElement = document.getElementById('transcript');
-                transcriptElement.scrollTop = transcriptElement.scrollHeight;
-                let transcript = messageJson["text"];
-                transcription += (transcript + "\n");
-                transcriptElement.value = transcription;
+                if("result" in messageJson){
+                    console.log("Full sentence: ", messageJson);
+                    let new_transcript = messageJson.text;
+                    transcription += (new_transcript + "\n");
+                    transcriptElement.value = transcription;
+                    transcriptElement.scrollTop = transcriptElement.scrollHeight;    
+                }
+                else if("partial" in messageJson && messageJson.partial !== ""){
+                    console.log("Partial words: ", messageJson);
+                    let new_transcript = messageJson.partial;
+                    transcriptElement.value = transcription + (" " + new_transcript); 
+                    // transcription += (" " + new_transcript);
+                    // transcriptElement.scrollTop = transcriptElement.scrollHeight;                    
+                }
+                // console.log(messageJson);
 
             //     let results = messageJson.Transcript.Results;
             //     let speak = "Speaker ";
@@ -185,13 +201,13 @@ export default function Transcriber() {
                 }
             }
             
-            document.getElementById('stop-button')
+        document.getElementById('stop-button')
                 .addEventListener('click', () => {
                     closeSocket();
-                    // toggleStartStop();
+                    toggleStartStop();
             });
 
-            document.getElementById('clear-button')
+        document.getElementById('clear-button')
             .addEventListener('click', () => {
                 document.getElementById('transcript').value = "";
                 transcription = '';
@@ -211,7 +227,6 @@ export default function Transcriber() {
 
         function convertAudioToBinaryMessage(audioChunk) {
             let raw = mic.toRaw(audioChunk);
-        
             if (raw == null)
                 return;
         
@@ -223,9 +238,10 @@ export default function Transcriber() {
             let audioEventMessage = getAudioEventMessage(Buffer.from(pcmEncodedBuffer));
         
             //convert the JSON object + headers into a binary event stream message
-            let binary = eventStreamMarshaller.marshall(audioEventMessage);
+            // let binary = eventStreamMarshaller.marshall(audioEventMessage);
         
-            return binary;
+            // return binary;
+            return audioEventMessage;
         }
 
         function getAudioEventMessage(buffer) {

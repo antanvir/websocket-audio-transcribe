@@ -1,4 +1,3 @@
-import logo from './logo.svg';
 import './App.css';
 
 import ClientUI from './lib/client-ui';
